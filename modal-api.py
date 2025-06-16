@@ -1,3 +1,5 @@
+# main.py  
+  
 from pymongo import MongoClient  
 from bson import ObjectId  
 from fastapi import FastAPI, HTTPException, Body, Response  
@@ -5,7 +7,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field  
 import modal  
 import os  
-import bcrypt  # Added import for bcrypt  
+from passlib.context import CryptContext  # Import passlib  
   
 # --- Configuration ---  
   
@@ -20,11 +22,14 @@ image = modal.Image.debian_slim(python_version="3.12").pip_install(
     "fastapi[standard]==0.115.4",  
     "pymongo==4.7.2",  
     "pydantic==2.7.1",  
-    "bcrypt==4.0.1"  # Added bcrypt here  
+    "passlib==1.7.4"  # Updated to use passlib  
 )  
   
 # Create a Modal App instance.  
 app = modal.App("wishlist-api", image=image)  
+  
+# Set up CryptContext for password hashing  
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")  
   
 # Create the FastAPI app.  
 web_app = FastAPI(  
@@ -78,9 +83,9 @@ async def create_wishlist(data: WishlistCreate):
         collection = client.moonshop.wishlists  
         wishlist_dict = data.dict()  
         password = wishlist_dict.pop('password', '')  
-        # Hash the password using bcrypt  
-        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())  
-        wishlist_dict['password_hash'] = hashed_password.decode('utf-8')  # Store as string  
+        # Hash the password using passlib  
+        hashed_password = pwd_context.hash(password)  
+        wishlist_dict['password_hash'] = hashed_password  
         # Insert the new wishlist and get its inserted ID  
         result = collection.insert_one(wishlist_dict)  
         wishlist_id = str(result.inserted_id)  
@@ -167,10 +172,10 @@ async def remove_item(item_id: str, request: RemoveItemRequest = Body(...)):
         password_hash = wishlist.get('password_hash')  
         if password_hash is None:  
             # Assume empty password for wishlists without a password  
-            password_hash = bcrypt.hashpw(''.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')  
+            password_hash = pwd_context.hash('')  
   
-        hashed_password = password_hash.encode('utf-8')  
-        if not bcrypt.checkpw(password.encode('utf-8'), hashed_password):  
+        # Verify the password  
+        if not pwd_context.verify(password, password_hash):  
             raise HTTPException(status_code=403, detail="Incorrect password")  
   
         # Proceed to delete the item  
