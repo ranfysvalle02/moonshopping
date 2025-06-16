@@ -20,6 +20,9 @@ const ENDPOINTS = {
   viewList: `${BASE_URL}/view_list`, // Endpoint for viewing a wishlist by ID  
 };  
   
+// Password storage for the session  
+const wishlistPasswords = {}; // Map of wishlistId to password  
+  
 // Function to get the currently selected wishlist name and id  
 function getCurrentWishlist() {  
   const select = document.getElementById('wishlistSelect');  
@@ -87,12 +90,12 @@ async function getWishlists() {
 }  
   
 // Function to create a new wishlist via the API  
-async function createWishlist(wishlistName) {  
+async function createWishlist(wishlistName, password) {  
   try {  
     const response = await fetch(ENDPOINTS.createWishlist, {  
       method: 'POST',  
       headers: { 'Content-Type': 'application/json' },  
-      body: JSON.stringify({ wishlist_name: wishlistName }),  
+      body: JSON.stringify({ wishlist_name: wishlistName, password: password }),  
     });  
   
     if (response.ok) {  
@@ -259,8 +262,34 @@ async function addItem() {
   }  
 }  
   
+// Function to prompt for password  
+function promptForPassword() {  
+  return new Promise((resolve) => {  
+    const passwordPromptModal = new bootstrap.Modal(document.getElementById('passwordPromptModal'));  
+    const submitButton = document.getElementById('submitPasswordButton');  
+    const passwordInput = document.getElementById('passwordInput');  
+    const rememberPasswordCheck = document.getElementById('rememberPasswordCheck');  
+  
+    const handleSubmit = () => {  
+      const password = passwordInput.value;  
+      const rememberPassword = rememberPasswordCheck.checked;  
+  
+      // Clean up event listener  
+      submitButton.removeEventListener('click', handleSubmit);  
+      passwordPromptModal.hide();  
+      passwordInput.value = '';  
+      rememberPasswordCheck.checked = false;  
+  
+      resolve({ password, rememberPassword });  
+    };  
+  
+    submitButton.addEventListener('click', handleSubmit);  
+    passwordPromptModal.show();  
+  });  
+}  
+  
 // Function to remove an item from the wishlist via the API or local storage  
-async function removeItem(itemIdOrUrl) {  
+async function removeItem(itemIdOrUrl, password) {  
   const currentWishlist = getCurrentWishlist();  
   
   if (currentWishlist.wishlistId === 'local') {  
@@ -273,10 +302,18 @@ async function removeItem(itemIdOrUrl) {
     try {  
       const response = await fetch(`${ENDPOINTS.removeItem}/${encodeURIComponent(itemIdOrUrl)}`, {  
         method: 'DELETE',  
+        headers: {  
+          'Content-Type': 'application/json',  
+        },  
+        body: JSON.stringify({ password: password }),  
       });  
       if (!response.ok) {  
-        console.error('Failed to remove item with ID:', itemIdOrUrl);  
-        alert('Failed to remove item.');  
+        const errorData = await response.json();  
+        alert('Failed to remove item: ' + (errorData.detail || 'Unknown error'));  
+        // If password is incorrect, remove it from the stored passwords  
+        if (errorData.detail === 'Incorrect password') {  
+          delete wishlistPasswords[currentWishlist.wishlistId];  
+        }  
       } else {  
         // Item removed successfully  
         console.log('Item removed.');  
@@ -440,7 +477,19 @@ async function displayWishlist() {
         if (currentWishlist.wishlistId === 'local') {  
           await removeItem(item.url); // Use URL as unique identifier  
         } else {  
-          await removeItem(item.id); // Use ID from API  
+          let password = wishlistPasswords[currentWishlist.wishlistId];  
+  
+          if (!password) {  
+            const result = await promptForPassword();  
+            if (!result || !result.password) {  
+              return;  
+            }  
+            password = result.password;  
+            if (result.rememberPassword) {  
+              wishlistPasswords[currentWishlist.wishlistId] = password;  
+            }  
+          }  
+          await removeItem(item.id, password);  
         }  
         // Item is removed in removeItem function  
       });  
@@ -514,14 +563,20 @@ document.getElementById('newWishlistButton').addEventListener('click', () => {
 // Event listener for the modal "Save" button  
 document.getElementById('saveWishlistButton').addEventListener('click', async () => {  
   const wishlistNameInput = document.getElementById('newWishlistName');  
+  const passwordInput = document.getElementById('newWishlistPassword');  
   const wishlistName = wishlistNameInput.value.trim();  
+  const password = passwordInput.value;  
   
   if (wishlistName) {  
-    const result = await createWishlist(wishlistName);  
+    if (!password) {  
+      alert('Warning: Empty password. Anyone with the wishlist ID can delete items from your wishlist.');  
+    }  
+    const result = await createWishlist(wishlistName, password);  
     if (result.success) {  
       await loadWishlists();  
       document.getElementById('wishlistSelect').value = result.wishlistId;  
       wishlistNameInput.value = ''; // Clear the input  
+      passwordInput.value = ''; // Clear the password input  
   
       // Hide the modal  
       const newWishlistModal = bootstrap.Modal.getInstance(document.getElementById('newWishlistModal'));  
