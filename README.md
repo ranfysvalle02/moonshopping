@@ -2,6 +2,9 @@
 
 ---
 
+TODO: Make sure password is required for add/remove from wishlist
+[wishlist_id+password] = add/remove ok; else just read-only
+
 # Build a Shareable Wishlist App with MongoDB Atlas and Modal's Serverless Platform  
    
 Have you ever struggled to keep track of gift ideas for friends and family, or wanted to share a wishlist with loved ones without the hassle of multiple apps and platforms? Imagine a centralized, shareable wishlist application that allows you to save items from any webpage, organize them into custom lists, and share them effortlessly. In this blog post, we'll walk you through building such an app using **MongoDB Atlas** and **Modal's serverless platform**, both leveraging their free tiers.  
