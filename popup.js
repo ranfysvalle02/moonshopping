@@ -5,7 +5,7 @@ let currentPage = 1;
 const itemsPerPage = 5; // Maximum of 5 items per page  
   
 // API Base URL  
-const BASE_URL = 'https://ranfysvalle02--wishlist-api-fastapi-app.modal.run'; // Update this to your actual base URL    
+const BASE_URL = 'https://ranfysvalle02--wishlist-api-fastapi-app.modal.run'; // Update this to your actual base URL  
   
 // API Endpoints  
 const ENDPOINTS = {  
@@ -54,7 +54,12 @@ function isAuthenticated() {
 // Function to get the currently selected wishlist name and id  
 function getCurrentWishlist() {  
   const select = document.getElementById('wishlistSelect');  
-  const selectedOption = select.options[select.selectedIndex];  
+  const selectedIndex = select.selectedIndex;  
+  if (selectedIndex < 0) {  
+    // No option is selected  
+    return { wishlistName: '', wishlistId: '' };  
+  }  
+  const selectedOption = select.options[selectedIndex];  
   const wishlistName = selectedOption.text;  
   const wishlistId = selectedOption.value;  
   return { wishlistName, wishlistId };  
@@ -152,6 +157,8 @@ async function login(username, password) {
     if (response.ok) {  
       const data = await response.json();  
       storeTokens(data.access_token, data.refresh_token);  
+      // Store the username for display purposes  
+      localStorage.setItem('username', username);  
       return true;  
     } else {  
       const errorData = await response.json();  
@@ -168,6 +175,8 @@ async function login(username, password) {
 // Function to logout  
 function logout() {  
   clearTokens();  
+  // Clear stored username  
+  localStorage.removeItem('username');  
   // Update UI  
   document.getElementById('authSection').style.display = 'block';  
   document.getElementById('welcomeSection').style.display = 'none';  
@@ -360,8 +369,6 @@ async function addItem() {
   
 // Function to remove an item from the wishlist via the API  
 async function removeItem(itemId) {  
-  const currentWishlist = getCurrentWishlist();  
-  
   try {  
     const response = await authenticatedFetch(`${ENDPOINTS.removeItem}/${encodeURIComponent(itemId)}`, {  
       method: 'DELETE',  
@@ -384,10 +391,13 @@ async function removeItem(itemId) {
 // Function to get items in the wishlist from the API  
 async function getWishlistItems(wishlist) {  
   try {  
-    const response = await authenticatedFetch(`${ENDPOINTS.viewItems}?wishlist_id=${encodeURIComponent(wishlist.wishlistId)}`);  
+    const response = await authenticatedFetch(  
+      `${ENDPOINTS.viewItems}?wishlist_id=${encodeURIComponent(wishlist.wishlistId)}`  
+    );  
     if (response.ok) {  
       const data = await response.json();  
-      return data.items; // Assuming API returns { "items": [...] }  
+      // Ensure data is structured as expected  
+      return data.items || []; // Assuming API returns { "items": [...] }  
     } else {  
       console.error('Failed to fetch items for wishlist:', wishlist.wishlistName);  
       return [];  
@@ -406,6 +416,14 @@ async function loadWishlists() {
   // Clear existing options  
   select.innerHTML = '';  
   
+  // Add the default 'Select a Wishlist' option  
+  const defaultOption = document.createElement('option');  
+  defaultOption.value = '';  
+  defaultOption.disabled = true;  
+  defaultOption.selected = true;  
+  defaultOption.textContent = 'Select a Wishlist';  
+  select.appendChild(defaultOption);  
+  
   // Append wishlist options  
   wishlistArray.forEach((wishlist) => {  
     const option = document.createElement('option');  
@@ -414,9 +432,11 @@ async function loadWishlists() {
     select.appendChild(option);  
   });  
   
-  // Select the first wishlist by default  
   if (wishlistArray.length > 0) {  
+    // Select the first wishlist by default  
     select.value = wishlistArray[0].id;  
+    // Trigger the change event to update the display  
+    select.dispatchEvent(new Event('change'));  
   }  
   
   // Update the share button state  
@@ -450,14 +470,14 @@ async function displayWishlist() {
   
   const currentWishlist = getCurrentWishlist();  
   
-  let items = [];  
-  
-  if (currentWishlist.wishlistId) {  
-    items = await getWishlistItems(currentWishlist);  
-  } else {  
-    status.textContent = 'Your wishlist is empty.';  
+  if (!currentWishlist.wishlistId) {  
+    status.textContent = 'Please select a wishlist to view items.';  
     return;  
   }  
+  
+  let items = [];  
+  
+  items = await getWishlistItems(currentWishlist);  
   
   if (!items || items.length === 0) {  
     status.textContent = 'Your wishlist is empty.';  
@@ -671,7 +691,7 @@ document.getElementById('loginModalButton').addEventListener('click', async () =
       document.getElementById('authSection').style.display = 'none';  
       document.getElementById('welcomeSection').style.display = 'block';  
       document.getElementById('welcomeMessage').textContent = 'Welcome, ' + username + '!';  
-        
+  
       // Clear input fields  
       document.getElementById('usernameInput').value = '';  
       document.getElementById('passwordInput').value = '';  
@@ -710,8 +730,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (isAuthenticated()) {  
     document.getElementById('authSection').style.display = 'none';  
     document.getElementById('welcomeSection').style.display = 'block';  
-    // You might want to store the username during login and display it here  
-    document.getElementById('welcomeMessage').textContent = 'Welcome!';  
+    const username = localStorage.getItem('username') || 'User';  
+    document.getElementById('welcomeMessage').textContent = 'Welcome, ' + username + '!';  
     await loadWishlists();  
     await displayWishlist();  
   } else {  

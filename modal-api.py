@@ -3,7 +3,7 @@
 import os  
 import jwt  
 import datetime  
-from typing import Dict, Optional  
+from typing import Dict, Optional, List  
   
 from fastapi import FastAPI, HTTPException, Body, Depends, Header, status  
 from fastapi.responses import JSONResponse, HTMLResponse  
@@ -112,6 +112,10 @@ class ItemResponse(BaseModel):
     title: str  
     image: Optional[str]  
     url: Optional[str]  
+  
+class ViewItemsResponse(BaseModel):  
+    wishlist_id: str  
+    items: List[ItemResponse]  
   
 # --- Helper Functions ---  
   
@@ -274,7 +278,7 @@ async def create_wishlist(
     # Return the wishlist_id so that it can be used to share the wishlist  
     return {"message": f"Wishlist '{data.wishlist_name}' created successfully.", "wishlist_id": wishlist_id}  
   
-@web_app.get("/get_wishlists", response_model=Dict[str, list[WishlistResponse]], tags=["Wishlists"])  
+@web_app.get("/get_wishlists", response_model=Dict[str, List[WishlistResponse]], tags=["Wishlists"])  
 async def get_wishlists(Authorization: str = Header(None)):  
     """Retrieves a list of all wishlists for the authenticated user."""  
     username = get_current_user(Authorization)  
@@ -308,7 +312,7 @@ async def add_item(
     result = items_collection.insert_one(item_dict)  
     return {"message": "Item added successfully", "id": str(result.inserted_id)}  
   
-@web_app.get("/view_items", response_model=Dict[str, list[ItemResponse]], tags=["Items"])  
+@web_app.get("/view_items", response_model=ViewItemsResponse, tags=["Items"])  
 async def view_items(  
     wishlist_id: str,  
     Authorization: str = Header(None)  
@@ -328,7 +332,7 @@ async def view_items(
     items_cursor = items_collection.find({'wishlist_id': wishlist_id})  
     serialized_items = [serialize_item(item) for item in items_cursor]  
   
-    return {"wishlist_id": wishlist_id, "items": serialized_items}  
+    return ViewItemsResponse(wishlist_id=wishlist_id, items=serialized_items)  
   
 @web_app.delete("/remove_item/{item_id}", tags=["Items"])  
 async def remove_item(  
@@ -399,12 +403,12 @@ async def view_list(wishlist_id: str):
     ])  
   
     # Now embed it cleanly in the final HTML template  
-    html_content = f"""      
-    <!DOCTYPE html>      
-    <html>      
-    <head>      
-        <title>{wishlist_name}</title>      
-        <style>      
+    html_content = f"""  
+    <!DOCTYPE html>  
+    <html>  
+    <head>  
+        <title>{wishlist_name}</title>  
+        <style>  
             body {{  
                 font-family: Arial, sans-serif;  
                 background-color: #f0f5f4;  
@@ -443,15 +447,15 @@ async def view_list(wishlist_id: str):
             .item a:hover {{  
                 text-decoration: underline;  
             }}  
-        </style>      
-    </head>      
-    <body>      
-        <div class="wishlist">      
-            <h1>Wishlist: {wishlist_name}</h1>      
-            {item_html}    
-        </div>      
-    </body>      
-    </html>      
+        </style>  
+    </head>  
+    <body>  
+        <div class="wishlist">  
+            <h1>Wishlist: {wishlist_name}</h1>  
+            {item_html}  
+        </div>  
+    </body>  
+    </html>  
     """  
   
     return HTMLResponse(content=html_content, status_code=200)  
