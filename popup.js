@@ -178,8 +178,12 @@ function logout() {
   // Clear stored username  
   localStorage.removeItem('username');  
   // Update UI  
-  document.getElementById('authSection').style.display = 'block';  
-  document.getElementById('welcomeSection').style.display = 'none';  
+  const authSection = document.getElementById('authSection');  
+  const welcomeSection = document.getElementById('welcomeSection');  
+  const mainContent = document.getElementById('mainContent');  
+  showSection(authSection);  
+  hideSection(welcomeSection);  
+  hideSection(mainContent);  
   document.getElementById('wishlistSelect').innerHTML = '';  
   document.getElementById('wishlistContainer').innerHTML = '';  
   document.getElementById('status').textContent = 'Please log in to view your wishlists.';  
@@ -350,7 +354,7 @@ async function addItem() {
           // Reset to the first page  
           currentPage = 1;  
           // Update the UI  
-          displayWishlist();  
+          await displayWishlist();  
           // Show success alert  
           alert('Item added to "' + currentWishlist.wishlistName + '"!');  
         }  
@@ -380,7 +384,7 @@ async function removeItem(itemId) {
       // Item removed successfully  
       console.log('Item removed.');  
       // Update the UI  
-      displayWishlist();  
+      await displayWishlist();  
     }  
   } catch (error) {  
     console.error('Error removing item:', error);  
@@ -427,16 +431,17 @@ async function loadWishlists() {
   // Append wishlist options  
   wishlistArray.forEach((wishlist) => {  
     const option = document.createElement('option');  
-    option.value = wishlist.id; // Use wishlist_id (MongoDB's _id)  
+    option.value = wishlist.id; // Use wishlist_id (assumed to be 'id')  
     option.textContent = wishlist.wishlist_name;  
     select.appendChild(option);  
   });  
   
   if (wishlistArray.length > 0) {  
-    // Select the first wishlist by default  
+    // Select the first wishlist by default without dispatching the 'change' event  
     select.value = wishlistArray[0].id;  
-    // Trigger the change event to update the display  
-    select.dispatchEvent(new Event('change'));  
+  
+    // Manually call displayWishlist  
+    await displayWishlist();  
   }  
   
   // Update the share button state  
@@ -537,7 +542,6 @@ async function displayWishlist() {
         event.preventDefault();  
         // Remove the item  
         await removeItem(item.id);  
-        // Item is removed in removeItem function  
       });  
   
       itemCard.appendChild(leftSide);  
@@ -586,6 +590,41 @@ async function displayWishlist() {
   }  
 }  
   
+// Smooth transitions when showing/hiding sections  
+function showSection(section) {  
+  // Remove the 'hidden' class to start the transition  
+  section.classList.remove('hidden');  
+  
+  // Add the 'section-visible' class to ensure the section is displayed  
+  section.classList.add('section-visible');  
+  
+  // Force a reflow to ensure the transition starts correctly  
+  void section.offsetWidth;  
+}  
+  
+function hideSection(section) {  
+  // Check if section is already hidden  
+  if (section.classList.contains('hidden')) {  
+    return;  
+  }  
+  
+  // Define the event handler  
+  function handleTransitionEnd(event) {  
+    // Ensure the event is for opacity transition  
+    if (event.propertyName === 'opacity') {  
+      section.classList.remove('section-visible');  
+      // Clean up the event listener  
+      section.removeEventListener('transitionend', handleTransitionEnd);  
+    }  
+  }  
+  
+  // Add the transitionend event listener  
+  section.addEventListener('transitionend', handleTransitionEnd);  
+  
+  // Add the 'hidden' class to start the transition  
+  section.classList.add('hidden');  
+}  
+  
 // Event listener for the "Add Current Item" button  
 document.getElementById('addButton').addEventListener('click', async () => {  
   if (!isAuthenticated()) {  
@@ -632,7 +671,7 @@ document.getElementById('saveWishlistButton').addEventListener('click', async ()
   
       // Reset to the first page  
       currentPage = 1;  
-      displayWishlist();  
+      await displayWishlist();  
       updateShareButtonState();  
   
       // Show success alert  
@@ -688,8 +727,12 @@ document.getElementById('loginModalButton').addEventListener('click', async () =
       authModal.hide();  
   
       // Update UI  
-      document.getElementById('authSection').style.display = 'none';  
-      document.getElementById('welcomeSection').style.display = 'block';  
+      const authSection = document.getElementById('authSection');  
+      const welcomeSection = document.getElementById('welcomeSection');  
+      const mainContent = document.getElementById('mainContent');  
+      hideSection(authSection);  
+      showSection(welcomeSection);  
+      showSection(mainContent);  
       document.getElementById('welcomeMessage').textContent = 'Welcome, ' + username + '!';  
   
       // Clear input fields  
@@ -698,7 +741,6 @@ document.getElementById('loginModalButton').addEventListener('click', async () =
   
       // Load wishlists and display  
       await loadWishlists();  
-      await displayWishlist();  
     }  
   } else {  
     alert('Please enter username and password.');  
@@ -724,19 +766,27 @@ document.getElementById('registerModalButton').addEventListener('click', async (
   }  
 });  
   
-// Display the wishlist when the popup loads  
+// Display the correct sections when the popup loads  
 document.addEventListener('DOMContentLoaded', async () => {  
   loadTokens();  
+  const authSection = document.getElementById('authSection');  
+  const welcomeSection = document.getElementById('welcomeSection');  
+  const mainContent = document.getElementById('mainContent');  
+  
   if (isAuthenticated()) {  
-    document.getElementById('authSection').style.display = 'none';  
-    document.getElementById('welcomeSection').style.display = 'block';  
+    hideSection(authSection);  
+    showSection(welcomeSection);  
+    showSection(mainContent);  
+  
     const username = localStorage.getItem('username') || 'User';  
     document.getElementById('welcomeMessage').textContent = 'Welcome, ' + username + '!';  
     await loadWishlists();  
-    await displayWishlist();  
+    // Removed extra call to displayWishlist()  
+    // await displayWishlist();  
   } else {  
-    document.getElementById('authSection').style.display = 'block';  
-    document.getElementById('welcomeSection').style.display = 'none';  
+    showSection(authSection);  
+    hideSection(welcomeSection);  
+    hideSection(mainContent);  
     document.getElementById('status').textContent = 'Please log in to view your wishlists.';  
   }  
   updateShareButtonState();  
