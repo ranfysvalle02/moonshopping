@@ -268,6 +268,12 @@ async def create_wishlist(
 ):  
     """Creates a new wishlist."""  
     username = get_current_user(Authorization)  
+    # Validate the wishlist_id  
+    try:  
+        wishlist_obj_id = ObjectId(wishlist_id)  
+    except Exception:  
+        raise HTTPException(status_code=400, detail="Invalid wishlist ID format")  
+  
     wishlist_dict = {  
         'wishlist_name': data.wishlist_name,  
         'username': username  
@@ -293,6 +299,12 @@ async def add_item(
 ):  
     """Adds a new item to a wishlist."""  
     username = get_current_user(Authorization)  
+    # Validate the wishlist_id  
+    try:  
+        wishlist_obj_id = ObjectId(wishlist_id)  
+    except Exception:  
+        raise HTTPException(status_code=400, detail="Invalid wishlist ID format")  
+  
     # Validate the wishlist_id  
     try:  
         wishlist_obj_id = ObjectId(item.wishlist_id)  
@@ -341,13 +353,18 @@ async def remove_item(
 ):  
     """Removes a specific item from the wishlist by its ID."""  
     username = get_current_user(Authorization)  
+
+    # make sure user is authenticated  
+    if not username:  
+        raise HTTPException(status_code=401, detail="User not authenticated")
+
     try:  
         obj_id = ObjectId(item_id)  
     except Exception:  
         raise HTTPException(status_code=400, detail="Invalid item ID format")  
   
     # Find the item  
-    item = items_collection.find_one({'_id': obj_id})  
+    item = items_collection.find_one({'_id': obj_id, 'username': username})  
     if not item:  
         raise HTTPException(status_code=404, detail="Item not found")  
   
