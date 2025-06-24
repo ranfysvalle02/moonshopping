@@ -268,11 +268,6 @@ async def create_wishlist(
 ):  
     """Creates a new wishlist."""  
     username = get_current_user(Authorization)  
-    # Validate the wishlist_id  
-    try:  
-        wishlist_obj_id = ObjectId(wishlist_id)  
-    except Exception:  
-        raise HTTPException(status_code=400, detail="Invalid wishlist ID format")  
   
     wishlist_dict = {  
         'wishlist_name': data.wishlist_name,  
@@ -283,7 +278,7 @@ async def create_wishlist(
     wishlist_id = str(result.inserted_id)  
     # Return the wishlist_id so that it can be used to share the wishlist  
     return {"message": f"Wishlist '{data.wishlist_name}' created successfully.", "wishlist_id": wishlist_id}  
-  
+    
 @web_app.get("/get_wishlists", response_model=Dict[str, List[WishlistResponse]], tags=["Wishlists"])  
 async def get_wishlists(Authorization: str = Header(None)):  
     """Retrieves a list of all wishlists for the authenticated user."""  
