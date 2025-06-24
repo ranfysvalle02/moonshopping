@@ -278,7 +278,7 @@ async def create_wishlist(
     wishlist_id = str(result.inserted_id)  
     # Return the wishlist_id so that it can be used to share the wishlist  
     return {"message": f"Wishlist '{data.wishlist_name}' created successfully.", "wishlist_id": wishlist_id}  
-    
+
 @web_app.get("/get_wishlists", response_model=Dict[str, List[WishlistResponse]], tags=["Wishlists"])  
 async def get_wishlists(Authorization: str = Header(None)):  
     """Retrieves a list of all wishlists for the authenticated user."""  
@@ -294,11 +294,6 @@ async def add_item(
 ):  
     """Adds a new item to a wishlist."""  
     username = get_current_user(Authorization)  
-    # Validate the wishlist_id  
-    try:  
-        wishlist_obj_id = ObjectId(wishlist_id)  
-    except Exception:  
-        raise HTTPException(status_code=400, detail="Invalid wishlist ID format")  
   
     # Validate the wishlist_id  
     try:  
@@ -317,7 +312,7 @@ async def add_item(
   
     item_dict = item.dict()  
     result = items_collection.insert_one(item_dict)  
-    return {"message": "Item added successfully", "id": str(result.inserted_id)}  
+    return {"message": "Item added successfully", "id": str(result.inserted_id)}   
   
 @web_app.get("/view_items", response_model=ViewItemsResponse, tags=["Items"])  
 async def view_items(  
@@ -348,18 +343,18 @@ async def remove_item(
 ):  
     """Removes a specific item from the wishlist by its ID."""  
     username = get_current_user(Authorization)  
-
-    # make sure user is authenticated  
+  
+    # Make sure user is authenticated  
     if not username:  
-        raise HTTPException(status_code=401, detail="User not authenticated")
-
+        raise HTTPException(status_code=401, detail="User not authenticated")  
+  
     try:  
         obj_id = ObjectId(item_id)  
     except Exception:  
         raise HTTPException(status_code=400, detail="Invalid item ID format")  
   
     # Find the item  
-    item = items_collection.find_one({'_id': obj_id, 'username': username})  
+    item = items_collection.find_one({'_id': obj_id})  
     if not item:  
         raise HTTPException(status_code=404, detail="Item not found")  
   
@@ -367,10 +362,15 @@ async def remove_item(
     if not wishlist_id:  
         raise HTTPException(status_code=404, detail="Wishlist ID not found for the item")  
   
-    wishlist_obj_id = ObjectId(wishlist_id)  
+    try:  
+        wishlist_obj_id = ObjectId(wishlist_id)  
+    except Exception:  
+        raise HTTPException(status_code=400, detail="Invalid wishlist ID format")  
+  
+    # Check if the wishlist exists and belongs to the user  
     wishlist = wishlists_collection.find_one({'_id': wishlist_obj_id, 'username': username})  
     if not wishlist:  
-        raise HTTPException(status_code=404, detail="Wishlist not found or access denied")  
+        raise HTTPException(status_code=404, detail="Wishlist does not exist or access denied")  
   
     # Proceed to delete the item  
     result = items_collection.delete_one({'_id': obj_id})  
@@ -378,7 +378,7 @@ async def remove_item(
         return {"message": "Item removed successfully"}  
     else:  
         raise HTTPException(status_code=404, detail="Item not found")  
-  
+
 @web_app.get("/view_list/{wishlist_id}", response_class=HTMLResponse, tags=["Wishlists"])  
 async def view_list(wishlist_id: str):  
     """View a wishlist and its items by wishlist_id."""  
