@@ -1,10 +1,8 @@
 // popup.js
 
-// Global variables for pagination
+// --- Global variables ---
 let currentPage = 1;
 const itemsPerPage = 5;
-
-// API Base URL
 const BASE_URL = 'https://ranfysvalle02--wishlist-api-fastapi-app.modal.run';
 
 // API Endpoints
@@ -26,7 +24,7 @@ let refreshToken = '';
 
 // --- Helper Functions ---
 
-// NEW: Helper function to manage button loading state
+// Sets the loading state for a button
 function setButtonLoading(button, isLoading) {
   const spinner = button.querySelector('.spinner-border');
   const text = button.querySelector('.button-text');
@@ -41,23 +39,27 @@ function setButtonLoading(button, isLoading) {
   }
 }
 
-function storeTokens(access, refresh) {
+// --- Token/Storage Management using chrome.storage.local ---
+
+// Stores tokens using the asynchronous chrome.storage API.
+async function storeTokens(access, refresh) {
   accessToken = access;
   refreshToken = refresh;
-  localStorage.setItem('accessToken', accessToken);
-  localStorage.setItem('refreshToken', refreshToken);
+  await chrome.storage.local.set({ accessToken, refreshToken });
 }
 
-function loadTokens() {
-  accessToken = localStorage.getItem('accessToken') || '';
-  refreshToken = localStorage.getItem('refreshToken') || '';
+// Loads tokens from chrome.storage.
+async function loadTokens() {
+  const data = await chrome.storage.local.get(['accessToken', 'refreshToken']);
+  accessToken = data.accessToken || '';
+  refreshToken = data.refreshToken || '';
 }
 
-function clearTokens() {
+// Clears tokens from chrome.storage.
+async function clearTokens() {
   accessToken = '';
   refreshToken = '';
-  localStorage.removeItem('accessToken');
-  localStorage.removeItem('refreshToken');
+  await chrome.storage.local.remove(['accessToken', 'refreshToken']);
 }
 
 function isAuthenticated() {
@@ -67,9 +69,7 @@ function isAuthenticated() {
 function getCurrentWishlist() {
   const select = document.getElementById('wishlistSelect');
   const selectedIndex = select.selectedIndex;
-  if (selectedIndex < 1) {
-    return { wishlistName: '', wishlistId: '' };
-  }
+  if (selectedIndex < 1) return { wishlistName: '', wishlistId: '' };
   const selectedOption = select.options[selectedIndex];
   return { wishlistName: selectedOption.text, wishlistId: selectedOption.value };
 }
@@ -85,7 +85,7 @@ async function authenticatedFetch(url, options = {}) {
       response = await fetch(url, options);
     } else {
       alert('Session expired. Please log in again.');
-      logout();
+      await logout();
       throw new Error('Authentication required');
     }
   }
@@ -102,19 +102,20 @@ async function refreshAccessToken() {
     });
     if (response.ok) {
       const data = await response.json();
-      storeTokens(data.access_token, data.refresh_token);
+      await storeTokens(data.access_token, data.refresh_token);
       return true;
     }
-    clearTokens();
+    await clearTokens();
     return false;
   } catch (error) {
     console.error('Error refreshing token:', error);
-    clearTokens();
+    await clearTokens();
     return false;
   }
 }
 
 // --- Authentication Functions ---
+
 async function register(username, password) {
   try {
     const response = await fetch(ENDPOINTS.register, {
@@ -145,8 +146,8 @@ async function login(username, password) {
     });
     if (response.ok) {
       const data = await response.json();
-      storeTokens(data.access_token, data.refresh_token);
-      localStorage.setItem('username', username);
+      await storeTokens(data.access_token, data.refresh_token);
+      await chrome.storage.local.set({ username }); // Use chrome.storage
       return true;
     }
     const errorData = await response.json();
@@ -159,18 +160,85 @@ async function login(username, password) {
   }
 }
 
-function logout() {
-  clearTokens();
-  localStorage.removeItem('username');
+async function logout() {
+  await clearTokens();
+  await chrome.storage.local.remove('username');
   showSection(document.getElementById('authSection'));
   hideSection(document.getElementById('welcomeSection'));
   hideSection(document.getElementById('mainContent'));
   document.getElementById('wishlistSelect').innerHTML = '';
   document.getElementById('wishlistContainer').innerHTML = '';
+  document.getElementById('paginationContainer').innerHTML = '';
   document.getElementById('status').textContent = 'Please log in to view your wishlists.';
 }
 
-// --- API Functions ---
+// --- API & Core Functions ---
+
+function scrapePage() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs || tabs.length === 0) {
+        console.error("No active tab found.");
+        return resolve(null);
+      }
+      chrome.scripting.executeScript({
+        target: { tabId: tabs[0].id },
+        function: () => {
+          const siteConfigs = {
+            'www.amazon.com': {
+              title: ['#productTitle', '#title', '#ebooksProductTitle'],
+              image: ['#imgTagWrapperId img#landingImage', '#img-canvas img', '#ebooks-img-canvas img#ebooksImgBlkFront'],
+            }
+          };
+          const genericSelectors = {
+            title: ['meta[property="og:title"]', 'meta[name="twitter:title"]', 'h1'],
+            image: ['meta[property="og:image"]', 'meta[name="twitter:image"]'],
+          };
+          const querySelectors = (selectors, attribute = 'innerText') => {
+            for (const selector of selectors) {
+              const element = document.querySelector(selector);
+              if (element) {
+                let value = (attribute === 'innerText') ? element.innerText : element.getAttribute(attribute);
+                if (value) return value.trim();
+              }
+            }
+            return null;
+          };
+          const findBestImage = () => {
+            let bestImage = { src: null, area: 0 };
+            document.querySelectorAll('img').forEach(img => {
+              if (img.src && img.naturalWidth > 200 && img.naturalHeight > 200 && img.offsetParent !== null) {
+                const area = img.naturalWidth * img.naturalHeight;
+                if (area > bestImage.area) bestImage = { src: img.src, area };
+              }
+            });
+            return bestImage.src;
+          };
+          const hostname = window.location.hostname;
+          const siteConfig = siteConfigs[hostname];
+          let title = null, image = null;
+          if (siteConfig) {
+            title = querySelectors(siteConfig.title, 'innerText');
+            image = querySelectors(siteConfig.image, 'src');
+          }
+          if (!title) title = querySelectors(genericSelectors.title, 'content') || querySelectors(genericSelectors.title, 'innerText');
+          if (!image) image = querySelectors(genericSelectors.image, 'content');
+          if (!title) title = document.title || 'No title found';
+          if (!image) image = findBestImage();
+          return { title: title || 'Title not found', image: image || '', url: window.location.href };
+        },
+      }, (injectionResults) => {
+        if (chrome.runtime.lastError) {
+          console.error("Script injection failed: ", chrome.runtime.lastError.message);
+          resolve(null);
+        } else {
+          resolve(injectionResults?.[0]?.result || null);
+        }
+      });
+    });
+  });
+}
+
 async function getWishlists() {
   try {
     const response = await authenticatedFetch(ENDPOINTS.getWishlists);
@@ -188,46 +256,10 @@ async function createWishlist(wishlistName) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ wishlist_name: wishlistName }),
     });
-    if (response.ok) {
-      return { success: true, wishlistId: (await response.json()).wishlist_id };
-    }
-    return { success: false, error: (await response.json()).detail || 'Unknown error' };
+    return response.ok ? { success: true, wishlistId: (await response.json()).wishlist_id } : { success: false, error: (await response.json()).detail || 'Unknown error' };
   } catch (error) {
     return { success: false, error: error.message };
   }
-}
-
-function scrapePage() {
-  return new Promise((resolve) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs || tabs.length === 0) return resolve(null);
-      chrome.scripting.executeScript({
-        target: { tabId: tabs[0].id },
-        function: () => {
-          function getContent(selectors, attribute = 'content') {
-            for (const selector of selectors) {
-              const element = document.querySelector(selector);
-              if (element) {
-                if (attribute && element.hasAttribute(attribute)) return element.getAttribute(attribute);
-                if (!attribute && (element.innerText || element.textContent)) return element.innerText.trim() || element.textContent.trim();
-              }
-            }
-            return null;
-          }
-          const title = getContent(['meta[property="og:title"]', 'meta[name="twitter:title"]', 'h1', 'title'], 'content') || getContent(['title'], null) || 'No title found';
-          const image = getContent(['meta[property="og:image"]', 'meta[name="twitter:image"]', 'img[class*="product"]', 'img[class*="main"]'], 'content') || getContent(['meta[property="og:image"]', 'meta[name="twitter:image"]', 'img[class*="product"]', 'img[class*="main"]'], 'src') || '';
-          return { title, image, url: window.location.href };
-        },
-      }, (injectionResults) => {
-        if (chrome.runtime.lastError) {
-          console.error(chrome.runtime.lastError.message);
-          resolve(null);
-        } else {
-          resolve(injectionResults[0].result);
-        }
-      });
-    });
-  });
 }
 
 async function addItem() {
@@ -282,6 +314,22 @@ async function getWishlistItems(wishlist) {
   }
 }
 
+// --- UI Functions ---
+
+function showSection(section) {
+  section.classList.remove('hidden');
+  section.classList.add('section-visible');
+}
+
+function hideSection(section) {
+  section.classList.add('hidden');
+  section.classList.remove('section-visible');
+}
+
+function updateShareButtonState() {
+  document.getElementById('shareWishlistButton').disabled = !getCurrentWishlist().wishlistId;
+}
+
 async function loadWishlists() {
   const wishlistArray = await getWishlists();
   const select = document.getElementById('wishlistSelect');
@@ -296,10 +344,6 @@ async function loadWishlists() {
   updateShareButtonState();
 }
 
-function updateShareButtonState() {
-  document.getElementById('shareWishlistButton').disabled = !getCurrentWishlist().wishlistId;
-}
-
 async function displayWishlist() {
   const wishlistContainer = document.getElementById('wishlistContainer');
   const status = document.getElementById('status');
@@ -307,19 +351,24 @@ async function displayWishlist() {
   wishlistContainer.innerHTML = '';
   paginationContainer.innerHTML = '';
   const currentWishlist = getCurrentWishlist();
+
   if (!currentWishlist.wishlistId) {
     status.textContent = 'Select a wishlist to view items.';
     return;
   }
+
   const items = await getWishlistItems(currentWishlist);
+
   if (!items || items.length === 0) {
-    status.textContent = 'Your wishlist is empty.';
+    status.textContent = 'This wishlist is empty.';
   } else {
     status.textContent = '';
     const totalPages = Math.ceil(items.length / itemsPerPage);
     if (currentPage > totalPages) currentPage = totalPages;
     if (currentPage < 1) currentPage = 1;
+
     const itemsToDisplay = items.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
     itemsToDisplay.forEach((item, index) => {
       const itemCard = document.createElement('div');
       itemCard.className = 'list-group-item d-flex align-items-center justify-content-between';
@@ -337,23 +386,63 @@ async function displayWishlist() {
       });
       setTimeout(() => itemCard.classList.add('show'), index * 100);
     });
+
+    // Pagination logic
     if (totalPages > 1) {
-      // Pagination logic here...
+      const paginationControls = document.createElement('nav');
+      paginationControls.className = 'd-flex justify-content-center align-items-center mt-3';
+
+      const prevButton = document.createElement('button');
+      prevButton.className = 'btn btn-secondary btn-sm me-2';
+      prevButton.innerHTML = '&laquo; Previous';
+      prevButton.disabled = currentPage === 1;
+      prevButton.addEventListener('click', () => {
+        currentPage--;
+        displayWishlist();
+      });
+
+      const nextButton = document.createElement('button');
+      nextButton.className = 'btn btn-secondary btn-sm ms-2';
+      nextButton.innerHTML = 'Next &raquo;';
+      nextButton.disabled = currentPage === totalPages;
+      nextButton.addEventListener('click', () => {
+        currentPage++;
+        displayWishlist();
+      });
+
+      const pageInfo = document.createElement('span');
+      pageInfo.className = 'align-self-center mx-2';
+      pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+      
+      paginationControls.appendChild(prevButton);
+      paginationControls.appendChild(pageInfo);
+      paginationControls.appendChild(nextButton);
+      
+      paginationContainer.appendChild(paginationControls);
     }
   }
 }
 
-function showSection(section) {
-  section.classList.remove('hidden');
-  section.classList.add('section-visible');
-}
-
-function hideSection(section) {
-  section.classList.add('hidden');
-  section.classList.remove('section-visible');
-}
-
 // --- Event Listeners ---
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadTokens();
+  const data = await chrome.storage.local.get('username');
+  if (isAuthenticated()) {
+    hideSection(document.getElementById('authSection'));
+    showSection(document.getElementById('welcomeSection'));
+    showSection(document.getElementById('mainContent'));
+    document.getElementById('welcomeMessage').textContent = `Welcome back, ${data.username || 'User'}!`;
+    await loadWishlists();
+  } else {
+    showSection(document.getElementById('authSection'));
+    hideSection(document.getElementById('welcomeSection'));
+    hideSection(document.getElementById('mainContent'));
+    document.getElementById('status').textContent = 'Please log in to view your wishlists.';
+  }
+  updateShareButtonState();
+});
+
 document.getElementById('addButton').addEventListener('click', async () => {
   if (!isAuthenticated()) { alert('Please log in to add items.'); return; }
   await addItem();
@@ -396,23 +485,23 @@ document.getElementById('shareWishlistButton').addEventListener('click', () => {
   const currentWishlist = getCurrentWishlist();
   if (!currentWishlist.wishlistId) return alert('Please select a wishlist to share.');
   const shareableLink = `${ENDPOINTS.viewList}/${currentWishlist.wishlistId}`;
-  navigator.clipboard.writeText(shareableLink).then(() => {
-    alert(`Shareable link copied to clipboard:\n${shareableLink}`);
-  }).catch(() => alert(`Shareable link:\n${shareableLink}`));
+  navigator.clipboard.writeText(shareableLink)
+    .then(() => alert(`Shareable link copied to clipboard:\n${shareableLink}`))
+    .catch(() => alert(`Shareable link:\n${shareableLink}`));
 });
 
 document.getElementById('loginButton').addEventListener('click', () => {
   new bootstrap.Modal(document.getElementById('authModal')).show();
 });
 
-document.getElementById('logoutButton').addEventListener('click', logout);
+document.getElementById('logoutButton').addEventListener('click', async () => {
+  await logout();
+});
 
-// MODIFIED: Added loading feedback
 document.getElementById('loginModalButton').addEventListener('click', async (event) => {
   const loginButton = event.currentTarget;
   const username = document.getElementById('usernameInput').value.trim();
   const password = document.getElementById('passwordInput').value;
-
   if (!username || !password) return alert('Please enter username and password.');
 
   setButtonLoading(loginButton, true);
@@ -433,12 +522,10 @@ document.getElementById('loginModalButton').addEventListener('click', async (eve
   }
 });
 
-// MODIFIED: Added loading feedback
 document.getElementById('registerModalButton').addEventListener('click', async (event) => {
   const registerButton = event.currentTarget;
   const username = document.getElementById('usernameInput').value.trim();
   const password = document.getElementById('passwordInput').value;
-
   if (!username || !password) return alert('Please enter username and password.');
   
   setButtonLoading(registerButton, true);
@@ -451,21 +538,4 @@ document.getElementById('registerModalButton').addEventListener('click', async (
   } finally {
     setButtonLoading(registerButton, false);
   }
-});
-
-document.addEventListener('DOMContentLoaded', async () => {
-  loadTokens();
-  if (isAuthenticated()) {
-    hideSection(document.getElementById('authSection'));
-    showSection(document.getElementById('welcomeSection'));
-    showSection(document.getElementById('mainContent'));
-    document.getElementById('welcomeMessage').textContent = `Welcome back, ${localStorage.getItem('username') || 'User'}!`;
-    await loadWishlists();
-  } else {
-    showSection(document.getElementById('authSection'));
-    hideSection(document.getElementById('welcomeSection'));
-    hideSection(document.getElementById('mainContent'));
-    document.getElementById('status').textContent = 'Please log in to view your wishlists.';
-  }
-  updateShareButtonState();
 });
